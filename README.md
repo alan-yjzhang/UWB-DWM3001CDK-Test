@@ -1,7 +1,7 @@
 DWM3001CDK Test Firmware
 ========================
 
-**See also:** this is a clone from [DWM3001CDK Demo firmware repository]([https://github.com/Uberi/DWM3001CDK-demo-firmware/]).
+**See also:** this is a clone from [DWM3001CDK Demo firmware repository ](https://github.com/Uberi/DWM3001CDK-demo-firmware/).
 
 Quickstart
 ----------
