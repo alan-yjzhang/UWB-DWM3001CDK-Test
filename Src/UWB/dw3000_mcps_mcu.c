@@ -69,6 +69,7 @@
 #include "dw3000_xtal_trim.h"
 #include "dw3000_pdoa.h"
 #include "dw3000_statistics.h"
+#include "cir_capture.h"
 #include "task_signal.h"
 #include "int_priority.h"
 
@@ -645,6 +646,12 @@ static int rx_get_frame(struct mcps802154_llhw *llhw, struct sk_buff **skb,
         /* DW3000 only support one STS segment. */
         info->ranging_sts_timestamp_diffs_rctu[0] = 0;
         info->ranging_sts_timestamp_diffs_rctu[1] = sts_ts_rctu - rx->timeStamp;
+    }
+
+    /* Optional: stream the Ipatov CIR of each ranging (STS) frame, see cir_capture.h */
+    if (cir_capture_is_enabled() && (info->flags & MCPS802154_RX_FRAME_INFO_RANGING_STS_TIMESTAMP_RCTU))
+    {
+        cir_capture_frame(rx->timeStamp, (dw->config->rxtx_config->pdwCfg->rxCode > 8) ? 1016 : 992);
     }
 
     info->ranging_sts_fom[0] = 0;

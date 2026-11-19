@@ -95,6 +95,7 @@
         <file file_name="Src/Apps/fira_app.c" />
         <file file_name="Src/Apps/create_fira_app_task.c" />
         <file file_name="Src/Apps/fira_fn.c" />
+        <file file_name="Src/Apps/auto_start.c" />
         <file file_name="Src/Apps/fira_dw3000.c" />
         <file file_name="Src/Apps/reporter.c" />
         <file file_name="Src/Apps/app.c" />
@@ -112,6 +113,7 @@
         <file file_name="Src/UWB/dw3000_calib_mcu.c" />
         <file file_name="Src/UWB/dw3000_xtal_trim.c" />
         <file file_name="Src/UWB/dw3000_statistics.c" />
+        <file file_name="Src/UWB/cir_capture.c" />
         <file file_name="Src/UWB/dw3000_pdoa.c" />
         <file file_name="Src/UWB/uwbmac_platform.c" />
       </folder>
