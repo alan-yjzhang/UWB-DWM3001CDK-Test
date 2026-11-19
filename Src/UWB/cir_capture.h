@@ -18,13 +18,16 @@
  *   12     4     fp_index_raw   Ipatov first-path index from dwt_nlos_ipdiag(), raw (10.6 fixed point)
  *   16     4     pp_index_raw   Ipatov peak-path index, raw
  *   20     8     rx_timestamp   rctu timestamp of the received frame
- *   28     6*N   samples        per sample: real (3 bytes LE), imag (3 bytes LE); 18-bit signed values
+ *   (reserved 36 bytes)
+ *   64     6*N   samples        per sample: real (3 bytes LE), imag (3 bytes LE); 18-bit signed values
  */
-#define CIR_FRAME_HEADER_LEN 28
+#define CIR_FRAME_HEADER_LEN 64
+#define CIR_PRE_FP_SAMPLES   64
 #define CIR_NUM_SAMPLES      512
+#define CIR_IPATOV_MAX_SAMPLES  1016 // or 992 for 
 
 /* Capture 1 out of every CIR_CAPTURE_DECIMATE qualifying received frames (1 = all). */
-#define CIR_CAPTURE_DECIMATE 1
+#define CIR_CAPTURE_DECIMATE 10
 
 void cir_capture_set_enabled(bool enable);
 bool cir_capture_is_enabled(void);

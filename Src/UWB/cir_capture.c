@@ -55,12 +55,12 @@ void cir_capture_frame(uint64_t rx_timestamp, int acc_len)
         return;
     }
 
-    /* Choose the 512-sample window: put the first path 128 samples after the window start,
+    /* Choose the 512-sample window: put the first path xx samples after the window start,
      * clamped to the accumulator. */
     dwt_nlos_ipdiag_t idx;
     dwt_nlos_ipdiag(&idx);
     int fp = (int)(idx.index_fp_u32 >> 6); /* 10.6 fixed point -> integer index */
-    int start = fp - 128;
+    int start = fp - CIR_PRE_FP_SAMPLES;
     int max_start = acc_len - CIR_NUM_SAMPLES;
     if (start < 0)
     {

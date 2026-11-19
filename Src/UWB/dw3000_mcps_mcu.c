@@ -649,7 +649,7 @@ static int rx_get_frame(struct mcps802154_llhw *llhw, struct sk_buff **skb,
     }
 
     /* Optional: stream the Ipatov CIR of each ranging (STS) frame, see cir_capture.h */
-    if (cir_capture_is_enabled() && (info->flags & MCPS802154_RX_FRAME_INFO_RANGING_STS_TIMESTAMP_RCTU))
+    if (cir_capture_is_enabled() ) //&& (info->flags & MCPS802154_RX_FRAME_INFO_RANGING_STS_TIMESTAMP_RCTU))
     {
         cir_capture_frame(rx->timeStamp, (dw->config->rxtx_config->pdwCfg->rxCode > 8) ? 1016 : 992);
     }
