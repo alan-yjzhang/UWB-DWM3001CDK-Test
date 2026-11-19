@@ -436,6 +436,12 @@ static int tx_frame(struct mcps802154_llhw *llhw, struct sk_buff *skb,
 
     int nok = dw3000_tx_frame(dw, skb, tx_delayed, tx_date_dtu, rx_delay_dly, rx_timeout_pac);
 
+    /* CIR capture uses the time of our last ranging TX (the Poll) to tell which responder answered. */
+    if (!nok && tx_delayed)
+    {
+        cir_capture_note_tx(info->timestamp_dtu, (info->flags & MCPS802154_TX_FRAME_CONFIG_RANGING) != 0);
+    }
+
     /* requirement to keep ranging clock is a pre-requirement for the next Tx/Rx */
     rt->need_ranging_clock = (bool)(info->flags & MCPS802154_TX_FRAME_CONFIG_KEEP_RANGING_CLOCK);
 
@@ -648,10 +654,15 @@ static int rx_get_frame(struct mcps802154_llhw *llhw, struct sk_buff **skb,
         info->ranging_sts_timestamp_diffs_rctu[1] = sts_ts_rctu - rx->timeStamp;
     }
 
-    /* Optional: stream the Ipatov CIR of each ranging (STS) frame, see cir_capture.h */
+    /* Optional: capture the Ipatov CIR of each ranging (STS) frame, see cir_capture.h.
+     * RSSI comes from calculateStats() above, which runs only with diagnostics on ("DIAG 1"). */
     if (cir_capture_is_enabled() && (info->flags & MCPS802154_RX_FRAME_INFO_RANGING_STS_TIMESTAMP_RCTU))
     {
-        cir_capture_frame(rx->timeStamp, (dw->config->rxtx_config->pdwCfg->rxCode > 8) ? 1016 : 992);
+        cir_capture_frame(rx->timeStamp,
+                          timestamp_rctu_to_dtu(dw, rx->timeStamp) - llhw->shr_dtu,
+                          llhw->rstu_dtu,
+                          (dw->config->rxtx_config->pdwCfg->rxCode > 8) ? 1016 : 992,
+                          dw->mcps_runtime->diag.enable ? dw->mcps_runtime->diag.rssi : 0.0f);
     }
 
     info->ranging_sts_fom[0] = 0;

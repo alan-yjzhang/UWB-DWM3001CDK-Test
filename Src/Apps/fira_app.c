@@ -72,6 +72,7 @@
 #include "fira_app.h"
 #include "dw3000_pdoa.h"
 #include "create_fira_app_task.h"
+#include "cir_capture.h"
 
 extern void pdoaupdate_lut(void);
 
@@ -305,6 +306,27 @@ static void report_cb(const struct ranging_results *results, void *user_data)
 
     len += snprintf(&str_result->str[len], str_result->len - len, "}\r\n");
     reporter_instance.print((char *)str_result->str, len);
+
+    /* Send the CIR held for each responder this round, now with its address, distance and RSSI.
+     * Responder i of the controlee list answers in slot i+1 after the Poll (see cir_capture.h). */
+    if (cir_capture_is_enabled())
+    {
+        const struct controlees_parameters *cl = &fira_param->controlees_params;
+        for (int i = 0; i < results->n_measurements; i++)
+        {
+            rm = (struct ranging_measurements *)(&results->measurements[i]);
+            for (int j = 0; j < cl->n_controlees; j++)
+            {
+                if (cl->controlees[j].address == rm->short_addr)
+                {
+                    cir_capture_report(rm->short_addr, j + 1, fira_param->session.slot_duration_rstu,
+                                       rm->status, rm->distance_mm);
+                    break;
+                }
+            }
+        }
+        cir_capture_round_done();
+    }
 }
 
 /* @brief DW3000 RX : RTOS implementation
