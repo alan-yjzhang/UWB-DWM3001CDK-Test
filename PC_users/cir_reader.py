@@ -2,9 +2,9 @@
 """
 Reader for the initiator's USB (J20) stream: JSON text lines mixed with binary CIR frames.
 
-Binary frame (little-endian, 40-byte header), see Src/UWB/cir_capture.h:
+Binary frame (little-endian, 64-byte header), see Src/UWB/cir_capture.h:
   FF 'C' 'I' 'R' | n u16 | start u16 | seq u32 | fp_raw u32 | pp_raw u32 | ts u64 |
-  responder u16 | status u8 | slot u8 | distance_mm i32 | rssi_cdbm i16 | reserved u16 |
+  responder u16 | status u8 | slot u8 | distance_mm i32 | rssi_cdbm i16 | reserved 26B |
   n * (re 3B, im 3B)
 
   responder  short address of the anchor (0xFFFF = could not be matched)
@@ -26,8 +26,8 @@ import argparse, struct, sys
 import numpy as np
 
 MAGIC = b"\xffCIR"
-HDR = struct.Struct("<4sHHIIIQHBBihH")  # 40 bytes
-assert HDR.size == 40
+HDR = struct.Struct("<4sHHIIIQHBBih26x")  # 64 bytes (last 26 reserved)
+assert HDR.size == 64
 
 RESPONDER_UNKNOWN = 0xFFFF
 STATUS_NO_RESULT = 0xFF
@@ -72,7 +72,7 @@ def parse_stream(chunks):
             if len(buf) < HDR.size:
                 break
             (_, n, start, seq, fp, pp, ts,
-             addr, status, slot, dist_mm, rssi_cdbm, _res) = HDR.unpack_from(buf)
+             addr, status, slot, dist_mm, rssi_cdbm) = HDR.unpack_from(buf)
             total = HDR.size + 6 * n
             if n == 0 or n > 1024:         # corrupt header: skip this magic and resync
                 del buf[:1]

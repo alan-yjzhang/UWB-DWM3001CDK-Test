@@ -188,7 +188,7 @@ void cir_capture_frame(uint64_t rx_timestamp, uint32_t rx_frame_start_dtu, int r
     f[31] = 0;
     put_u32(&f[32], (uint32_t)CIR_DISTANCE_INVALID);
     put_u16(&f[36], (uint16_t)rssi_to_cdbm(rssi_dbm));
-    put_u16(&f[38], 0);
+    memset(&f[38], 0, CIR_FRAME_HEADER_LEN - 38); /* reserved, also clears the dummy byte */
 
     e->state = ENTRY_READY;
 }

@@ -33,10 +33,10 @@
  *   32     4     distance_mm    measured distance in mm, int32 (INT32_MIN when status != 0)
  *   36     2     rssi_cdbm      RSSI of the received frame in 0.01 dBm, int16 (INT16_MIN = not available;
  *                               needs diagnostics on, i.e. "DIAG 1", which auto_start.c turns on)
- *   38     2     reserved       0
- *   40     6*N   samples        per sample: real (3 bytes LE), imag (3 bytes LE); 18-bit signed values
+ *   38     26    reserved       0 (for future fields)
+ *   64     6*N   samples        per sample: real (3 bytes LE), imag (3 bytes LE); 18-bit signed values
  */
-#define CIR_FRAME_HEADER_LEN 40
+#define CIR_FRAME_HEADER_LEN 64
 #define CIR_NUM_SAMPLES      512
 
 /* Capture 1 out of every CIR_CAPTURE_DECIMATE ranging rounds (1 = every round). Every responder of
