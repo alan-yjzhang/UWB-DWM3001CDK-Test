@@ -83,6 +83,7 @@ void cir_capture_frame(uint64_t rx_timestamp, int acc_len)
     put_u32(&cir_captured_frame[16], idx.index_pp_u32);
     put_u32(&cir_captured_frame[20], (uint32_t)rx_timestamp);
     put_u32(&cir_captured_frame[24], (uint32_t)(rx_timestamp >> 32));
+    memset(&cir_captured_frame[28], 0, CIR_FRAME_HEADER_LEN - 28);
 
     /* Copies the whole frame into the report ring buffer (dropped as a unit if it does not fit). */
     //port_tx_msg(cir_captured_frame, (int)sizeof(cir_captured_frame));
