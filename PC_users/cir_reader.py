@@ -17,7 +17,7 @@ import argparse, struct, sys
 import numpy as np
 
 MAGIC = b"\xffCIR"
-HDR = struct.Struct("<4sHHIIIQHBBihH")  # 64 bytes
+HDR = struct.Struct("<4sHHIIIQHBBih26x")  # 64 bytes
 assert HDR.size==64
 
 
@@ -55,7 +55,7 @@ def parse_stream(chunks):
                 del buf[:i]
             if len(buf) < HDR.size:
                 break
-            _, n, start, seq, fp, pp, ts = HDR.unpack_from(buf)
+            _, n, start, seq, fp, pp, ts,addr, status, slot, dist_mm, rssi= HDR.unpack_from(buf)
             total = HDR.size + 6 * n
             if n == 0 or n > 1024:         # corrupt header: skip this magic and resync
                 del buf[:1]
