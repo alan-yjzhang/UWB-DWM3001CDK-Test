@@ -26,8 +26,12 @@
 #define CIR_NUM_SAMPLES      512
 #define CIR_IPATOV_MAX_SAMPLES  1016 // or 992 for 
 
+#define SAMPLE_BYTES 6 /* 3 bytes real + 3 bytes imag */
+
+#define CIR_FRAME_LENGTH (CIR_FRAME_HEADER_LEN + CIR_NUM_SAMPLES * SAMPLE_BYTES)
 /* Capture 1 out of every CIR_CAPTURE_DECIMATE qualifying received frames (1 = all). */
 #define CIR_CAPTURE_DECIMATE 10
+extern uint8_t cir_captured_frame[];
 
 void cir_capture_set_enabled(bool enable);
 bool cir_capture_is_enabled(void);
@@ -35,5 +39,6 @@ bool cir_capture_is_enabled(void);
 /* Read the Ipatov CIR of the frame just received and queue it for transmission.
  * acc_len: Ipatov accumulator length (1016 for 64 MHz PRF, 992 for 16 MHz PRF). */
 void cir_capture_frame(uint64_t rx_timestamp, int acc_len);
+//void cir_capture_add_mcps_diag(struct mcps_diag_s* diag);
 
 #endif /* CIR_CAPTURE_H */

@@ -12,11 +12,9 @@
 #include "usb_uart_tx.h"
 #include "cir_capture.h"
 
-#define SAMPLE_BYTES 6 /* 3 bytes real + 3 bytes imag */
-
 /* One buffer holds header + payload. dwt_readaccdata() returns a dummy first byte, so we read
  * into the slot just before the payload and then overwrite that byte with the last header byte. */
-static uint8_t frame[CIR_FRAME_HEADER_LEN + CIR_NUM_SAMPLES * SAMPLE_BYTES];
+uint8_t cir_captured_frame[CIR_FRAME_LENGTH];
 
 static volatile bool enabled = false;
 static uint32_t seq = 0;
@@ -72,20 +70,33 @@ void cir_capture_frame(uint64_t rx_timestamp, int acc_len)
     }
 
     /* Read N samples (+1 dummy byte). The dummy byte ends up at frame[HEADER_LEN - 1]. */
-    dwt_readaccdata(&frame[CIR_FRAME_HEADER_LEN - 1], CIR_NUM_SAMPLES * SAMPLE_BYTES + 1, (uint16_t)start);
+    dwt_readaccdata(&cir_captured_frame[CIR_FRAME_HEADER_LEN - 1], CIR_NUM_SAMPLES * SAMPLE_BYTES + 1, (uint16_t)start);
 
-    frame[0] = 0xFF;
-    frame[1] = 'C';
-    frame[2] = 'I';
-    frame[3] = 'R';
-    put_u16(&frame[4], CIR_NUM_SAMPLES);
-    put_u16(&frame[6], (uint16_t)start);
-    put_u32(&frame[8], seq++);
-    put_u32(&frame[12], idx.index_fp_u32);
-    put_u32(&frame[16], idx.index_pp_u32);
-    put_u32(&frame[20], (uint32_t)rx_timestamp);
-    put_u32(&frame[24], (uint32_t)(rx_timestamp >> 32));
+    cir_captured_frame[0] = 0xFF;
+    cir_captured_frame[1] = 'C';
+    cir_captured_frame[2] = 'I';
+    cir_captured_frame[3] = 'R';
+    put_u16(&cir_captured_frame[4], CIR_NUM_SAMPLES);
+    put_u16(&cir_captured_frame[6], (uint16_t)start);
+    put_u32(&cir_captured_frame[8], seq++);
+    put_u32(&cir_captured_frame[12], idx.index_fp_u32);
+    put_u32(&cir_captured_frame[16], idx.index_pp_u32);
+    put_u32(&cir_captured_frame[20], (uint32_t)rx_timestamp);
+    put_u32(&cir_captured_frame[24], (uint32_t)(rx_timestamp >> 32));
 
     /* Copies the whole frame into the report ring buffer (dropped as a unit if it does not fit). */
-    port_tx_msg(frame, (int)sizeof(frame));
+    //port_tx_msg(cir_captured_frame, (int)sizeof(cir_captured_frame));
 }
+static int16_t  rssi2cdbm(float rssi_dbm)
+{
+    // the driver reports a valid RSSI as negative dBm value
+    if( !(rssi_dbm < 0.0f) || rssi_dbm < -327.0f){
+        return 0xFFFF;
+    }
+    return (int16_t)(rssi_dbm *100.0f - 0.5f);
+}
+
+// void cir_capture_add_mcps_diag(struct mcps_diag_s* diag)
+// {
+//     return;
+// }

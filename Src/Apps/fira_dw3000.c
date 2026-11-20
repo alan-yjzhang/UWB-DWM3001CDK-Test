@@ -164,3 +164,8 @@ int fira_uwb_add_diag(char *str, int len, int max_len)
     len += snprintf(&str[len], max_len - len, ",\"NLOS_%%\":%d", (int)dw->mcps_runtime->diag.non_line_of_sight);
     return len;
 }
+int fira_uwb_get_mcps_diag(struct mcps_diag_s* res)
+{
+    memcpy(res, &dw->mcps_runtime->diag, sizeof(struct mcps_diag_s));
+    return 0;
+}

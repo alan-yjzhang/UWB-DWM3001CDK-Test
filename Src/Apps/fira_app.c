@@ -69,9 +69,11 @@
 #include "HAL_uwb.h"
 #include "cmd.h"
 
+#include "dw3000_mcps_mcu.h"
 #include "fira_app.h"
 #include "dw3000_pdoa.h"
 #include "create_fira_app_task.h"
+#include "cir_capture.h"
 
 extern void pdoaupdate_lut(void);
 
@@ -115,6 +117,7 @@ static bool started = false;
 static void report_cb(const struct ranging_results *results, void *user_data);
 static struct string_measurement output_result;
 
+static struct mcps_diag_s diag_result;
 
 /* fira_app_process_init
  */
@@ -237,6 +240,7 @@ static void report_cb(const struct ranging_results *results, void *user_data)
         return;
     }
 
+
     len = sprintf(str_result->str, "{\"Block\":%" PRIu32 ", \"results\":[", results->block_index);
 
     for (int i = 0; i < results->n_measurements; i++)
@@ -305,6 +309,14 @@ static void report_cb(const struct ranging_results *results, void *user_data)
 
     len += snprintf(&str_result->str[len], str_result->len - len, "}\r\n");
     reporter_instance.print((char *)str_result->str, len);
+
+    if(cir_capture_is_enabled()){ // Capture CIR only
+        //fira_uwb_get_mcps_diag(&diag_result);
+        //cir_capture_add_mcps_diag(&diag_result);
+        port_tx_msg(cir_captured_frame, CIR_FRAME_LENGTH);
+        return;
+    }
+    
 }
 
 /* @brief DW3000 RX : RTOS implementation

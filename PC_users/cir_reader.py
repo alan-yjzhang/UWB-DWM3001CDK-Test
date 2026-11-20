@@ -17,7 +17,8 @@ import argparse, struct, sys
 import numpy as np
 
 MAGIC = b"\xffCIR"
-HDR = struct.Struct("<4sHHIIIQ")  # 28 bytes
+HDR = struct.Struct("<4sHHIIIQHBBihH")  # 64 bytes
+assert HDR.size==64
 
 
 def decode_samples(raw, n):
