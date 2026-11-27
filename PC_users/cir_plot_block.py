@@ -1,36 +1,44 @@
 #!/usr/bin/env python3
 """
-Live CIR magnitude plot, with distance and RSSI taken from the reported JSON block line.
+Live CIR magnitude plot, with distance and RSSI taken from the reported JSON block lines.
 
-Same plot as cir_plot.py, but the distance, status and RSSI shown for each responder come from the
-ranging result line the initiator prints every round, not from the CIR frame header:
+The initiator prints one result line per ranging round:
 
   {"Block":12, "results":[{"Addr":"0x0001","Status":"Ok","D_cm":523,...}, ...],
    "RSSI_dBm":"-81.3","NLOS_%":0}
 
-The firmware prints that line first and then sends the round's CIR frames, so each CIR frame is
-paired with the most recent block line. The CIR frame header is only used for the responder
-address (to look up its D_cm) and the CIR window (start index, first path).
+and, after some of those lines, a binary CIR frame. Not every block line is followed by a CIR
+frame, so the two are handled separately:
+
+  - Distances, status and RSSI always come from the MOST RECENT block line, whether or not a CIR
+    came with it. They are shown in the text panel and refreshed every update.
+  - The CIR curve is the most recent CIR frame. The title says which block line it followed and
+    how many block lines have arrived since, so you can see how old the CIR is.
+  - A CIR frame with the same seq number as the previous one (the firmware re-sent the buffer
+    without a new capture) is counted as a repeat, not as a new CIR.
+
+The CIR frame header is only used for the CIR window (start index, first path) and seq; its
+reserved bytes are ignored.
 
 Note on RSSI: the block line has ONE "RSSI_dBm" value per round (diagnostics of the last frame the
-initiator received), not one per responder. The same value is shown for every responder of that
-round. It is only present with diagnostics on ("DIAG 1", which auto_start.c enables).
+initiator received), not one per responder. It is only present with diagnostics on ("DIAG 1").
 
 Frame (little-endian, 64-byte header):
-  FF 'C' 'I' 'R' | n u16 | start u16 | seq u32 | fp_raw u32 | pp_raw u32 | ts u64 |
-  responder u16 | status u8 | slot u8 | distance_mm i32 | rssi_cdbm i16 | reserved 26B |
+  FF 'C' 'I' 'R' | n u16 | start u16 | seq u32 | fp_raw u32 | pp_raw u32 | ts u64 | reserved 36B |
   n * (re 3B, im 3B)   18-bit signed real/imag parts
 
 Usage:
   pip install pyserial numpy matplotlib
   python cir_plot_block.py --port COM5                  # refresh every second
   python cir_plot_block.py --port COM5 --interval 2     # refresh every 2 seconds
-  python cir_plot_block.py --port COM5 --align-fp       # x axis relative to each frame's first path
+  python cir_plot_block.py --port COM5 --align-fp       # x axis relative to the first path
   python cir_plot_block.py --port COM5 --db             # magnitude in dB
+  python cir_plot_block.py --port COM5 --history 5      # also show the 4 previous CIRs, faded
   python cir_plot_block.py --file capture.bin           # replay a raw stream saved to disk
 Close the plot window (or Ctrl+C) to stop.
 """
 import argparse
+import collections
 import json
 import struct
 import threading
@@ -45,10 +53,8 @@ from matplotlib.animation import FuncAnimation
 # ------------------------------------------------------------------------------------------------
 
 MAGIC = b"\xffCIR"
-HDR = struct.Struct("<4sHHIIIQHBBih26x")  # 64 bytes, last 26 reserved
+HDR = struct.Struct("<4sHHIIIQ36x")  # 64 bytes, last 36 reserved
 assert HDR.size == 64
-
-RESPONDER_UNKNOWN = 0xFFFF
 
 
 def to_complex(raw, n):
@@ -88,7 +94,7 @@ def parse_stream(chunks):
                 del buf[:i]
             if len(buf) < HDR.size:
                 break
-            (_, n, start, seq, fp, pp, ts, addr, _st, _slot, _dist, _rssi) = HDR.unpack_from(buf)
+            (_, n, start, seq, fp, pp, ts) = HDR.unpack_from(buf)
             if n == 0 or n > 1024:           # corrupt header: skip this magic and resync
                 del buf[:1]
                 continue
@@ -97,8 +103,7 @@ def parse_stream(chunks):
                 break
             cir = to_complex(bytes(buf[HDR.size:total]), n)
             del buf[:total]
-            yield "cir", dict(seq=seq, start=start, fp_raw=fp, pp_raw=pp, ts=ts,
-                              responder=None if addr == RESPONDER_UNKNOWN else addr, cir=cir)
+            yield "cir", dict(seq=seq, start=start, fp_raw=fp, pp_raw=pp, ts=ts, cir=cir)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -134,8 +139,7 @@ def parse_block(line):
         rssi = float(msg.get("RSSI_dBm"))    # printed as a string: "-81.3" or "Invalid"
     except (TypeError, ValueError):
         rssi = None
-    nlos = msg.get("NLOS_%")
-    return dict(block=msg["Block"], rssi_dbm=rssi, nlos_pct=nlos, results=results)
+    return dict(block=msg["Block"], rssi_dbm=rssi, nlos_pct=msg.get("NLOS_%"), results=results)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -161,31 +165,28 @@ def file_chunks(path, size=4096):
 
 
 # ------------------------------------------------------------------------------------------------
-#  Reader thread + plot
+#  Reader thread
 # ------------------------------------------------------------------------------------------------
 
-class CirStore:
-    """Latest CIR per responder (with its block info), shared between the reader thread and the plot."""
+class Store:
+    """State shared between the reader thread and the plot."""
 
-    def __init__(self):
+    def __init__(self, history):
         self.lock = threading.Lock()
-        self.latest = {}        # responder (int, or None if unmatched) -> frame dict
-        self.n_frames = 0
+        self.block = None                                  # latest block line (parsed)
         self.n_blocks = 0
+        self.cirs = collections.deque(maxlen=history)      # latest CIR frames, newest last
+        self.n_cir = 0                                     # new CIRs (distinct seq)
+        self.n_repeat = 0                                  # re-sent CIRs (same seq as before)
         self.error = None
-
-    def put(self, frame):
-        with self.lock:
-            self.latest[frame["responder"]] = frame
-            self.n_frames += 1
 
     def snapshot(self):
         with self.lock:
-            return dict(self.latest), self.n_frames, self.n_blocks, self.error
+            return dict(block=self.block, n_blocks=self.n_blocks, cirs=list(self.cirs),
+                        n_cir=self.n_cir, n_repeat=self.n_repeat, error=self.error)
 
 
 def reader_thread(chunks, store, show_json):
-    block = None   # most recent block line; the CIR frames that follow belong to it
     try:
         for kind, obj in parse_stream(chunks):
             if kind == "text":
@@ -193,35 +194,42 @@ def reader_thread(chunks, store, show_json):
                     print(obj)
                 b = parse_block(obj)
                 if b is not None:
-                    block = b
                     with store.lock:
+                        store.block = b
                         store.n_blocks += 1
                 continue
 
-            # CIR frame: obj["cir"] is a complex64 array. Take distance / RSSI from the block line.
-            res = block["results"].get(obj["responder"]) if block else None
-            obj["block"] = block["block"] if block else None
-            obj["status"] = res["status"] if res else None
-            obj["distance_m"] = res["distance_m"] if res else None
-            obj["rssi_dbm"] = block["rssi_dbm"] if block else None
-            obj["nlos_pct"] = block["nlos_pct"] if block else None
-            store.put(obj)
+            # CIR frame (obj["cir"] is a complex64 array). Remember which block line it followed.
+            with store.lock:
+                obj["after_block"] = store.block["block"] if store.block else None
+                obj["after_n_blocks"] = store.n_blocks
+                if store.cirs and store.cirs[-1]["seq"] == obj["seq"]:
+                    store.n_repeat += 1
+                    store.cirs[-1] = obj                   # same capture re-sent: just refresh
+                else:
+                    store.n_cir += 1
+                    store.cirs.append(obj)
     except Exception as e:  # e.g. serial port unplugged
         with store.lock:
             store.error = e
 
 
-def label_for(f):
-    who = "unmatched" if f["responder"] is None else f"0x{f['responder']:04x}"
-    if f["distance_m"] is not None:
-        dist = f"{f['distance_m']:.2f} m"
-    elif f["status"] is not None:
-        dist = f["status"]                  # e.g. "Err"
-    else:
-        dist = "--"
-    rssi = "--" if f["rssi_dbm"] is None else f"{f['rssi_dbm']:.1f} dBm"
-    blk = "" if f["block"] is None else f"  [blk {f['block']}]"
-    return f"{who}  d={dist}  RSSI={rssi}{blk}"
+# ------------------------------------------------------------------------------------------------
+#  Plot
+# ------------------------------------------------------------------------------------------------
+
+def block_text(b):
+    if b is None:
+        return "no block line yet"
+    rows = [f"Block {b['block']}"]
+    for addr in sorted(b["results"]):
+        r = b["results"][addr]
+        d = f"{r['distance_m']:7.2f} m" if r["distance_m"] is not None else f"{r['status']:>9}"
+        rows.append(f"0x{addr:04x} {d}")
+    rows.append("RSSI   " + ("--" if b["rssi_dbm"] is None else f"{b['rssi_dbm']:.1f} dBm"))
+    if b["nlos_pct"] is not None:
+        rows.append(f"NLOS   {b['nlos_pct']} %")
+    return "\n".join(rows)
 
 
 def main():
@@ -233,61 +241,64 @@ def main():
     ap.add_argument("--interval", type=float, default=1.0, help="plot refresh period in seconds (default 1)")
     ap.add_argument("--align-fp", action="store_true", help="x axis = sample index minus first-path index")
     ap.add_argument("--db", action="store_true", help="plot 20*log10(|CIR|) instead of |CIR|")
+    ap.add_argument("--history", type=int, default=1, help="number of recent CIRs to draw (default 1)")
     ap.add_argument("--show-json", action="store_true", help="also print the text / JSON lines")
     args = ap.parse_args()
 
     chunks = serial_chunks(args.port, args.baud) if args.port else file_chunks(args.file)
-    store = CirStore()
+    store = Store(max(1, args.history))
     threading.Thread(target=reader_thread, args=(chunks, store, args.show_json), daemon=True).start()
 
-    fig, ax = plt.subplots(figsize=(11, 6))
+    fig, ax = plt.subplots(figsize=(12, 6))
+    fig.subplots_adjust(right=0.78)
     fig.canvas.manager.set_window_title("DWM3001CDK CIR magnitude (distance/RSSI from block line)")
     ax.set_xlabel("sample - first path" if args.align_fp else "CIR sample index")
     ax.set_ylabel("|CIR| (dB)" if args.db else "|CIR|")
     ax.grid(True, alpha=0.3)
-    title = ax.set_title("waiting for CIR frames...")
-
-    lines = {}       # responder -> Line2D
-    fp_marks = {}    # responder -> vertical first-path line
+    title = ax.set_title("waiting for data...")
+    info = fig.text(0.80, 0.88, "", va="top", ha="left", family="monospace", fontsize=10,
+                    bbox=dict(boxstyle="round", fc="#f4f4f4", ec="#999999"))
     t0 = time.time()
 
     def update(_):
-        latest, n_frames, n_blocks, err = store.snapshot()
-        if err is not None:
-            title.set_text(f"reader stopped: {err}")
+        s = store.snapshot()
+        info.set_text(block_text(s["block"]))
+        if s["error"] is not None:
+            title.set_text(f"reader stopped: {s['error']}")
             return
-        if not latest:
+        if not s["cirs"]:
+            title.set_text(f"{s['n_blocks']} block lines, no CIR frame yet")
             return
 
-        nlos = None
-        for resp in sorted(latest, key=lambda r: (r is None, r or 0)):
-            f = latest[resp]
+        for ln in list(ax.lines):
+            ln.remove()
+        k = len(s["cirs"])
+        for i, f in enumerate(s["cirs"]):
+            newest = (i == k - 1)
             mag = np.abs(f["cir"])                       # magnitude of the complex samples
             if args.db:
                 mag = 20 * np.log10(np.maximum(mag, 1.0))
             fp = f["fp_raw"] / 64.0                     # 10.6 fixed point -> sample index
             x = np.arange(len(mag)) + f["start"]
+            fp_x = fp
             if args.align_fp:
                 x = x - fp
                 fp_x = 0.0
+            if newest:
+                ax.plot(x, mag, lw=1.2, color="C0", label=f"CIR seq {f['seq']}")
+                ax.axvline(fp_x, ls="--", lw=0.8, color="C3", label="first path")
             else:
-                fp_x = fp
-
-            if resp not in lines:
-                (lines[resp],) = ax.plot(x, mag, lw=1.0)
-                fp_marks[resp] = ax.axvline(fp_x, ls="--", lw=0.8, color=lines[resp].get_color())
-            lines[resp].set_data(x, mag)
-            lines[resp].set_label(label_for(f))
-            fp_marks[resp].set_xdata([fp_x, fp_x])
-            if f["nlos_pct"] is not None:
-                nlos = f["nlos_pct"]
+                ax.plot(x, mag, lw=0.8, color="gray", alpha=0.2 + 0.5 * (i + 1) / k)
 
         ax.relim()
         ax.autoscale_view()
         ax.legend(loc="upper right", fontsize=9)
-        extra = "" if nlos is None else f"  |  NLOS {nlos}%"
-        title.set_text(f"latest CIR per responder  |  {n_frames} CIRs, {n_blocks} blocks in "
-                       f"{time.time() - t0:.0f} s{extra}  (dashed = first path)")
+        f = s["cirs"][-1]
+        age = s["n_blocks"] - f["after_n_blocks"]
+        after = "before any block line" if f["after_block"] is None else f"after block {f['after_block']}"
+        title.set_text(f"CIR seq {f['seq']} ({after}, {age} block lines since)  |  "
+                       f"{s['n_cir']} CIRs, {s['n_repeat']} repeats, {s['n_blocks']} blocks in "
+                       f"{time.time() - t0:.0f} s")
 
     anim = FuncAnimation(fig, update, interval=max(args.interval, 0.1) * 1000, cache_frame_data=False)
     try:
